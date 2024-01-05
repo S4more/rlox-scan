@@ -1,4 +1,5 @@
 use std::str::Lines;
+use itertools::{Itertools, PeekingNext};
 
 use crate::{
     error,
@@ -22,7 +23,7 @@ impl<'a> Scanner<'a> {
             let mut token_length: usize = 1;
             let mut char_iterator = line.chars().enumerate();
             while let Some((col, char)) = char_iterator.next() {
-                let token_size = self.scan_token(
+                self.scan_token(
                     &char,
                     line,
                     col as u32,
@@ -57,6 +58,7 @@ impl<'a> Scanner<'a> {
         tokens: &mut Vec<Token<'a>>,
     ) {
         let mut literal = None;
+        *token_length = 1; 
         let token = match char {
             '(' => Ok(TokenType::LeftParen),
             ')' => Ok(TokenType::RightParen),
@@ -118,7 +120,14 @@ impl<'a> Scanner<'a> {
                 }
                 Err(err) => Err(err),
             },
-            '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' => todo!(),
+            '0'..='9' => match self.scan_number_literal(line, col) {
+                Ok(number) => {
+                    literal = Some(number);
+                    *token_length = number.len();
+                    Ok(TokenType::Number)
+                }
+                Err(err) => Err(err)
+            }, 
             _ => Err("Unexpected character"),
         };
 
@@ -129,12 +138,31 @@ impl<'a> Scanner<'a> {
     }
 
     fn scan_number_literal(&self, line: &'a str, col: u32) -> Result<&str, &str> {
-        let mut line_iter = line.chars();
+        let mut line_iter = line.chars().enumerate().peekable();
         line_iter
             .advance_by(col as usize)
             .expect("Shouldn't happen...");
 
-        todo!()
+        while let Some((i, ch)) = line_iter.next() {
+            if !ch.is_digit(10) {
+                if ch == '.' {
+                    match line_iter.peek() {
+                        Some((_, next_char)) => {
+                            if !next_char.is_digit(10) {
+                                return Ok(line.get(col as usize..i).unwrap())
+                            }
+                        }
+                        None => return Ok(line.get(col as usize..i).unwrap()), 
+                    }
+                } else {
+                    let number = line.get(col as usize..i)
+                        .expect("Failed parsing number.");
+                    return Ok(number)
+                }
+            }
+        }
+
+        Ok(line.get(col as usize..line.len()).unwrap())
     }
 
     fn scan_string_literal(&self, line: &'a str, col: u32) -> Result<&str, &str> {
@@ -179,5 +207,17 @@ impl<'a> Scanner<'a> {
         };
 
         tokens.push(Token::new(token, lexeme, literal, row));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Scanner;
+
+    #[test]
+    fn parse_number() {
+        let scanner = Scanner::new("1234.12  123 123.");
+        let tokens = scanner.scan_tokens();
+        assert_eq!(tokens.len(), 4);
     }
 }
