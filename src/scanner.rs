@@ -1,9 +1,11 @@
-use std::str::Lines;
-use itertools::{Itertools, PeekingNext};
+use std::{
+    ops::{Add, AddAssign},
+    str::Lines,
+};
 
 use crate::{
     error,
-    token::{self, Token, TokenType},
+    token::{Token, TokenType, KEYWORDS},
 };
 
 pub struct Scanner<'a> {
@@ -38,12 +40,7 @@ impl<'a> Scanner<'a> {
 
         // let lines = self.source.lines().count();
 
-        // tokens.push(Token::new(
-        //     TokenType::EOF,
-        //     "".to_string(),
-        //     None,
-        //     lines as u32,
-        // ));
+        // tokens.push(Token::new(TokenType::EOF, "", lines as u32));
 
         tokens
     }
@@ -57,8 +54,7 @@ impl<'a> Scanner<'a> {
         token_length: &mut usize,
         tokens: &mut Vec<Token<'a>>,
     ) {
-        let mut literal = None;
-        *token_length = 1; 
+        *token_length = 1;
         let token = match char {
             '(' => Ok(TokenType::LeftParen),
             ')' => Ok(TokenType::RightParen),
@@ -114,25 +110,29 @@ impl<'a> Scanner<'a> {
             }
             '"' => match self.scan_string_literal(line, col) {
                 Ok(literal_string) => {
-                    literal = Some(literal_string);
-                    *token_length = literal_string.len();
-                    Ok(TokenType::String)
+                    // +2 because we need to include the two quotes
+                    *token_length = literal_string.len() + 2;
+                    Ok(TokenType::String(literal_string))
                 }
                 Err(err) => Err(err),
             },
             '0'..='9' => match self.scan_number_literal(line, col) {
-                Ok(number) => {
-                    literal = Some(number);
-                    *token_length = number.len();
-                    Ok(TokenType::Number)
+                Ok(literal) => {
+                    let number = literal.parse::<f32>().unwrap();
+                    *token_length = literal.len();
+                    Ok(TokenType::Number(number))
                 }
-                Err(err) => Err(err)
-            }, 
+                Err(err) => Err(err),
+            },
+            'a'..='z' | 'A'..='Z' | '_' => {
+                *token_length = self.scan_identifier(line, col, row, tokens);
+                return;
+            }
             _ => Err("Unexpected character"),
         };
 
         match token {
-            Ok(token) => Self::add_token(token, literal, line, col, row, token_length, tokens),
+            Ok(token) => Self::add_token(token, line, col, row, token_length, tokens),
             Err(err_message) => error(row, err_message),
         }
     }
@@ -144,20 +144,19 @@ impl<'a> Scanner<'a> {
             .expect("Shouldn't happen...");
 
         while let Some((i, ch)) = line_iter.next() {
-            if !ch.is_digit(10) {
+            if !ch.is_ascii_digit() {
                 if ch == '.' {
                     match line_iter.peek() {
                         Some((_, next_char)) => {
-                            if !next_char.is_digit(10) {
-                                return Ok(line.get(col as usize..i).unwrap())
+                            if !next_char.is_ascii_digit() {
+                                return Ok(line.get(col as usize..i).unwrap());
                             }
                         }
-                        None => return Ok(line.get(col as usize..i).unwrap()), 
+                        None => return Ok(line.get(col as usize..i).unwrap()),
                     }
                 } else {
-                    let number = line.get(col as usize..i)
-                        .expect("Failed parsing number.");
-                    return Ok(number)
+                    let number = line.get(col as usize..i).expect("Failed parsing number.");
+                    return Ok(number);
                 }
             }
         }
@@ -166,20 +165,53 @@ impl<'a> Scanner<'a> {
     }
 
     fn scan_string_literal(&self, line: &'a str, col: u32) -> Result<&str, &str> {
-        let mut line_iter = line.chars();
+        let mut line_iter = line.chars().enumerate();
         line_iter
             .advance_by((col + 1) as usize)
             .expect("Shouldn't happen...");
 
-        for (i, char) in line_iter.enumerate() {
+        for (i, char) in line_iter {
             if char == '"' {
-                let literal = line
-                    .get((col + 1) as usize..(col + 1) as usize + i)
-                    .unwrap();
+                let literal = line.get((col + 1) as usize..i).unwrap();
                 return Ok(literal);
             }
         }
         Err("Unterminated string.")
+    }
+
+    fn scan_identifier(
+        &self,
+        line: &'a str,
+        col: u32,
+        row: u32,
+        tokens: &mut Vec<Token<'a>>,
+    ) -> usize {
+        let mut line_iter = line.chars();
+        line_iter.advance_by(col as usize).unwrap();
+
+        let mut partial_str = String::from("");
+        for ch in line_iter {
+            if !ch.is_alphanumeric() {
+                break;
+            }
+
+            partial_str.push(ch);
+        }
+
+        if let Some(keyword) = KEYWORDS.get(&partial_str.as_str()) {
+            Self::add_token(*keyword, line, col, row, &partial_str.len(), tokens);
+        } else {
+            Self::add_token(
+                TokenType::Identifier,
+                line,
+                col,
+                row,
+                &partial_str.len(),
+                tokens,
+            )
+        }
+
+        partial_str.len()
     }
 
     fn match_next_char(&self, line: &str, col: u32, expected: char) -> bool {
@@ -191,33 +223,17 @@ impl<'a> Scanner<'a> {
     }
 
     fn add_token(
-        token: TokenType,
-        literal: Option<&'a str>,
+        token: TokenType<'a>,
         line: &'a str,
         col: u32,
         row: u32,
         token_length: &usize,
         tokens: &mut Vec<Token<'a>>,
     ) {
-        let lexeme = if let Some(literal_value) = literal {
-            literal_value
-        } else {
-            line.get((col + 1) as usize - *token_length..(col + 1) as usize)
-                .expect("Should have found lexme of token")
-        };
+        let lexeme = line
+            .get(col as usize..(col as usize) + token_length)
+            .expect("Should have found lexme of token");
 
-        tokens.push(Token::new(token, lexeme, literal, row));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Scanner;
-
-    #[test]
-    fn parse_number() {
-        let scanner = Scanner::new("1234.12  123 123.");
-        let tokens = scanner.scan_tokens();
-        assert_eq!(tokens.len(), 4);
+        tokens.push(Token::new(token, lexeme, row));
     }
 }

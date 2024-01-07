@@ -1,5 +1,5 @@
 #![feature(iter_advance_by)]
-mod scanner;
+pub mod scanner;
 mod token;
 
 pub fn add(left: usize, right: usize) -> usize {

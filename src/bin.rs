@@ -1,5 +1,6 @@
 use std::{env, fs, process::exit};
 
+use scan_lib::scanner::Scanner;
 use text_io::read;
 
 pub fn main() {
@@ -29,16 +30,13 @@ fn run_prompt() {
     loop {
         let line: String = read!();
         if !line.is_empty() {
-            if let Err(()) = run(line) {
-                exit(65);
-            }
+            run(line);
         }
     }
 }
 
-fn run(value: String) -> Result<(), ()> {
-    // 0. Scan the source code
-    // 1. Create tokens
-    // 2. print created tokens
-    todo!();
+fn run(value: String) {
+    let scanner = Scanner::new(value.as_str());
+    let tokens = scanner.scan_tokens();
+    println!("{:?}", tokens);
 }
