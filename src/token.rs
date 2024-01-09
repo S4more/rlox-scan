@@ -49,6 +49,8 @@ pub enum TokenType<'a> {
     Var,
     While,
 
+    Comment,
+
     EOF,
 }
 
@@ -119,7 +121,8 @@ mod tests {
     fn comment() {
         let scanner = Scanner::new(r#"// ("hey!")"#);
         let tokens = scanner.scan_tokens();
-        assert!(tokens.is_empty())
+        let token = tokens.first().unwrap();
+        assert!(matches!(token.token_type, TokenType::Comment));
     }
 
     #[test]
@@ -129,6 +132,15 @@ mod tests {
         let token = tokens.first().unwrap();
         assert_eq!(token.lexeme, "1234");
         assert_eq!(token.token_type, TokenType::Number(1234.0));
+    }
+
+    #[test]
+    fn parse_float() {
+        let scanner = Scanner::new("1234.15");
+        let tokens = scanner.scan_tokens();
+        let token = tokens.first().unwrap();
+        assert_eq!(token.lexeme, "1234.15");
+        assert_eq!(token.token_type, TokenType::Number(1234.15));
     }
 
     #[test]

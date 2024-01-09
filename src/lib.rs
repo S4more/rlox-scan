@@ -1,4 +1,6 @@
 #![feature(iter_advance_by)]
+#![feature(let_chains)]
+#![feature(trait_alias)]
 pub mod scanner;
 mod token;
 
